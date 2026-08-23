@@ -1,1 +1,14 @@
 doc/
+__pycache__/
+*.py[cod]
+*.swp
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+build/
+workspace/
+dist/
+*.egg-info/
+.venv/
+venv/
+env/

@@ -9,7 +9,7 @@ test-unit:
 	@echo "test-unit: no unit tests yet"
 
 test-isa:
-	@echo "test-isa: no ISA tests yet"
+	$(PYTHON) -m pytest tests/isa
 
 test-reference:
 	@echo "test-reference: no reference tests yet"

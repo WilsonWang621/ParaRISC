@@ -12,6 +12,6 @@ test-isa:
 	$(PYTHON) -m pytest tests/isa
 
 test-reference:
-	@echo "test-reference: no reference tests yet"
+	$(PYTHON) -m pytest tests/reference
 
 test-all: smoke test-unit test-isa test-reference

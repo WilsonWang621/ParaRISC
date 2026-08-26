@@ -41,6 +41,55 @@ def test_addi_result_wraps_to_32_bits():
     assert model.read_reg(2) == 0
 
 
+def test_op_imm_comparisons_use_signed_and_unsigned_semantics():
+    model = RV32IMModel()
+    model.write_reg(1, 0xFFFFFFFF)
+    program = [
+        encode_i_type(OPCODE_OP_IMM, 2, 0b010, 1, 1),
+        encode_i_type(OPCODE_OP_IMM, 3, 0b011, 1, 1),
+    ]
+    model.load_program(0, program)
+
+    model.run(2)
+
+    assert model.read_reg(2) == 1
+    assert model.read_reg(3) == 0
+
+
+def test_op_imm_logic_operations():
+    model = RV32IMModel()
+    model.write_reg(1, 0xFFFF0000)
+    program = [
+        encode_i_type(OPCODE_OP_IMM, 2, 0b100, 1, 0x0FF),
+        encode_i_type(OPCODE_OP_IMM, 3, 0b110, 1, 0x0FF),
+        encode_i_type(OPCODE_OP_IMM, 4, 0b111, 1, 0x0FF),
+    ]
+    model.load_program(0, program)
+
+    model.run(3)
+
+    assert model.read_reg(2) == 0xFFFF00FF
+    assert model.read_reg(3) == 0xFFFF00FF
+    assert model.read_reg(4) == 0
+
+
+def test_op_imm_shift_operations():
+    model = RV32IMModel()
+    model.write_reg(1, 0x80000000)
+    program = [
+        encode_i_type(OPCODE_OP_IMM, 2, 0b001, 1, 1),
+        encode_i_type(OPCODE_OP_IMM, 3, 0b101, 1, 1),
+        encode_i_type(OPCODE_OP_IMM, 4, 0b101, 1, (0b0100000 << 5) | 1),
+    ]
+    model.load_program(0, program)
+
+    model.run(3)
+
+    assert model.read_reg(2) == 0
+    assert model.read_reg(3) == 0x40000000
+    assert model.read_reg(4) == 0xC0000000
+
+
 def test_nop_keeps_x0_zero_and_advances_pc():
     model = RV32IMModel()
     model.write_reg(0, 123)

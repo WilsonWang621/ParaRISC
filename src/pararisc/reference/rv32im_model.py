@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from src.pararisc.isa.decoder import decode
-from src.pararisc.reference.arith import u32
+from src.pararisc.reference.arith import bool32, i32, shamt, u32
 from src.pararisc.reference.memory import ByteMemory
 from src.pararisc.reference.trace import CommitTrace
 
@@ -61,9 +61,9 @@ class RV32IMModel:
         memory_address = None
         memory_value = None
 
-        if uop.opcode == "ADDI":
+        if uop.opcode in {"ADDI", "SLTI", "SLTIU", "XORI", "ORI", "ANDI", "SLLI", "SRLI", "SRAI"}:
             rd = uop.rd
-            rd_value = u32(self.read_reg(uop.rs1) + uop.imm)
+            rd_value = self._execute_op_imm(uop.opcode, self.read_reg(uop.rs1), uop.imm)
             self.write_reg(uop.rd, rd_value)
         else:
             raise UnsupportedInstruction(f"unsupported instruction in reference model: {uop.opcode}")
@@ -88,6 +88,28 @@ class RV32IMModel:
         for _ in range(max_steps):
             traces.append(self.step())
         return traces
+
+    @staticmethod
+    def _execute_op_imm(opcode: str, rs1_value: int, imm: int) -> int:
+        if opcode == "ADDI":
+            return u32(rs1_value + imm)
+        if opcode == "SLTI":
+            return bool32(i32(rs1_value) < imm)
+        if opcode == "SLTIU":
+            return bool32(u32(rs1_value) < u32(imm))
+        if opcode == "XORI":
+            return u32(rs1_value ^ imm)
+        if opcode == "ORI":
+            return u32(rs1_value | imm)
+        if opcode == "ANDI":
+            return u32(rs1_value & imm)
+        if opcode == "SLLI":
+            return u32(rs1_value << shamt(imm))
+        if opcode == "SRLI":
+            return u32(rs1_value) >> shamt(imm)
+        if opcode == "SRAI":
+            return u32(i32(rs1_value) >> shamt(imm))
+        raise UnsupportedInstruction(f"unsupported OP-IMM instruction: {opcode}")
 
     @staticmethod
     def _check_register(index: int) -> None:

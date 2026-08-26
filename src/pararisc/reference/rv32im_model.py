@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from src.pararisc.isa.decoder import decode
-from src.pararisc.reference.arith import bool32, i32, shamt, u32
+from src.pararisc.isa.immediate import sign_extend
+from src.pararisc.reference.arith import INT32_MIN, bool32, i32, shamt, trunc_div_signed, u32
 from src.pararisc.reference.memory import ByteMemory
 from src.pararisc.reference.trace import CommitTrace
 
@@ -72,6 +73,27 @@ class RV32IMModel:
         elif uop.opcode in {"LUI", "AUIPC"}:
             rd = uop.rd
             rd_value = self._execute_u_type(uop.opcode, pc_before, uop.imm)
+            self.write_reg(uop.rd, rd_value)
+        elif uop.opcode in {"JAL", "JALR"}:
+            rd = uop.rd
+            rd_value = u32(pc_before + 4)
+            next_pc = self._execute_jump(uop.opcode, pc_before, self.read_reg(uop.rs1), uop.imm)
+            self.write_reg(uop.rd, rd_value)
+        elif uop.opcode in {"BEQ", "BNE", "BLT", "BGE", "BLTU", "BGEU"}:
+            if self._branch_taken(uop.opcode, self.read_reg(uop.rs1), self.read_reg(uop.rs2)):
+                next_pc = u32(pc_before + uop.imm)
+        elif uop.opcode in {"LB", "LH", "LW", "LBU", "LHU"}:
+            rd = uop.rd
+            memory_address = u32(self.read_reg(uop.rs1) + uop.imm)
+            rd_value = self._execute_load(uop.opcode, memory_address)
+            memory_value = rd_value
+            self.write_reg(uop.rd, rd_value)
+        elif uop.opcode in {"SB", "SH", "SW"}:
+            memory_address = u32(self.read_reg(uop.rs1) + uop.imm)
+            memory_value = self._execute_store(uop.opcode, memory_address, self.read_reg(uop.rs2))
+        elif uop.opcode in {"MUL", "MULH", "MULHSU", "MULHU", "DIV", "DIVU", "REM", "REMU"}:
+            rd = uop.rd
+            rd_value = self._execute_m_extension(uop.opcode, self.read_reg(uop.rs1), self.read_reg(uop.rs2))
             self.write_reg(uop.rd, rd_value)
         else:
             raise UnsupportedInstruction(f"unsupported instruction in reference model: {uop.opcode}")
@@ -150,6 +172,94 @@ class RV32IMModel:
         if opcode == "AUIPC":
             return u32(pc + imm)
         raise UnsupportedInstruction(f"unsupported U-type instruction: {opcode}")
+
+    @staticmethod
+    def _execute_jump(opcode: str, pc: int, rs1_value: int, imm: int) -> int:
+        if opcode == "JAL":
+            return u32(pc + imm)
+        if opcode == "JALR":
+            return u32(rs1_value + imm) & ~1
+        raise UnsupportedInstruction(f"unsupported jump instruction: {opcode}")
+
+    @staticmethod
+    def _branch_taken(opcode: str, rs1_value: int, rs2_value: int) -> bool:
+        if opcode == "BEQ":
+            return u32(rs1_value) == u32(rs2_value)
+        if opcode == "BNE":
+            return u32(rs1_value) != u32(rs2_value)
+        if opcode == "BLT":
+            return i32(rs1_value) < i32(rs2_value)
+        if opcode == "BGE":
+            return i32(rs1_value) >= i32(rs2_value)
+        if opcode == "BLTU":
+            return u32(rs1_value) < u32(rs2_value)
+        if opcode == "BGEU":
+            return u32(rs1_value) >= u32(rs2_value)
+        raise UnsupportedInstruction(f"unsupported branch instruction: {opcode}")
+
+    def _execute_load(self, opcode: str, address: int) -> int:
+        if opcode == "LB":
+            return u32(sign_extend(self.memory.load_u8(address), 8))
+        if opcode == "LH":
+            return u32(sign_extend(self.memory.load_u16(address), 16))
+        if opcode == "LW":
+            return u32(self.memory.load_u32(address))
+        if opcode == "LBU":
+            return self.memory.load_u8(address)
+        if opcode == "LHU":
+            return self.memory.load_u16(address)
+        raise UnsupportedInstruction(f"unsupported load instruction: {opcode}")
+
+    def _execute_store(self, opcode: str, address: int, value: int) -> int:
+        if opcode == "SB":
+            self.memory.store_u8(address, value)
+            return value & 0xFF
+        if opcode == "SH":
+            self.memory.store_u16(address, value)
+            return value & 0xFFFF
+        if opcode == "SW":
+            store_value = u32(value)
+            self.memory.store_u32(address, store_value)
+            return store_value
+        raise UnsupportedInstruction(f"unsupported store instruction: {opcode}")
+
+    @staticmethod
+    def _execute_m_extension(opcode: str, rs1_value: int, rs2_value: int) -> int:
+        lhs_u = u32(rs1_value)
+        rhs_u = u32(rs2_value)
+        lhs_s = i32(rs1_value)
+        rhs_s = i32(rs2_value)
+
+        if opcode == "MUL":
+            return u32(lhs_s * rhs_s)
+        if opcode == "MULH":
+            return u32((lhs_s * rhs_s) >> 32)
+        if opcode == "MULHSU":
+            return u32((lhs_s * rhs_u) >> 32)
+        if opcode == "MULHU":
+            return u32((lhs_u * rhs_u) >> 32)
+        if opcode == "DIV":
+            if rhs_s == 0:
+                return 0xFFFFFFFF
+            if lhs_s == INT32_MIN and rhs_s == -1:
+                return u32(INT32_MIN)
+            return u32(trunc_div_signed(lhs_s, rhs_s))
+        if opcode == "DIVU":
+            if rhs_u == 0:
+                return 0xFFFFFFFF
+            return u32(lhs_u // rhs_u)
+        if opcode == "REM":
+            if rhs_s == 0:
+                return lhs_u
+            if lhs_s == INT32_MIN and rhs_s == -1:
+                return 0
+            quotient = trunc_div_signed(lhs_s, rhs_s)
+            return u32(lhs_s - quotient * rhs_s)
+        if opcode == "REMU":
+            if rhs_u == 0:
+                return lhs_u
+            return u32(lhs_u % rhs_u)
+        raise UnsupportedInstruction(f"unsupported M extension instruction: {opcode}")
 
     @staticmethod
     def _check_register(index: int) -> None:

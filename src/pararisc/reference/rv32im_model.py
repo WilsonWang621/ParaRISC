@@ -65,6 +65,14 @@ class RV32IMModel:
             rd = uop.rd
             rd_value = self._execute_op_imm(uop.opcode, self.read_reg(uop.rs1), uop.imm)
             self.write_reg(uop.rd, rd_value)
+        elif uop.opcode in {"ADD", "SUB", "SLL", "SLT", "SLTU", "XOR", "SRL", "SRA", "OR", "AND"}:
+            rd = uop.rd
+            rd_value = self._execute_op(uop.opcode, self.read_reg(uop.rs1), self.read_reg(uop.rs2))
+            self.write_reg(uop.rd, rd_value)
+        elif uop.opcode in {"LUI", "AUIPC"}:
+            rd = uop.rd
+            rd_value = self._execute_u_type(uop.opcode, pc_before, uop.imm)
+            self.write_reg(uop.rd, rd_value)
         else:
             raise UnsupportedInstruction(f"unsupported instruction in reference model: {uop.opcode}")
 
@@ -110,6 +118,38 @@ class RV32IMModel:
         if opcode == "SRAI":
             return u32(i32(rs1_value) >> shamt(imm))
         raise UnsupportedInstruction(f"unsupported OP-IMM instruction: {opcode}")
+
+    @staticmethod
+    def _execute_op(opcode: str, rs1_value: int, rs2_value: int) -> int:
+        if opcode == "ADD":
+            return u32(rs1_value + rs2_value)
+        if opcode == "SUB":
+            return u32(rs1_value - rs2_value)
+        if opcode == "SLL":
+            return u32(rs1_value << shamt(rs2_value))
+        if opcode == "SLT":
+            return bool32(i32(rs1_value) < i32(rs2_value))
+        if opcode == "SLTU":
+            return bool32(u32(rs1_value) < u32(rs2_value))
+        if opcode == "XOR":
+            return u32(rs1_value ^ rs2_value)
+        if opcode == "SRL":
+            return u32(rs1_value) >> shamt(rs2_value)
+        if opcode == "SRA":
+            return u32(i32(rs1_value) >> shamt(rs2_value))
+        if opcode == "OR":
+            return u32(rs1_value | rs2_value)
+        if opcode == "AND":
+            return u32(rs1_value & rs2_value)
+        raise UnsupportedInstruction(f"unsupported OP instruction: {opcode}")
+
+    @staticmethod
+    def _execute_u_type(opcode: str, pc: int, imm: int) -> int:
+        if opcode == "LUI":
+            return u32(imm)
+        if opcode == "AUIPC":
+            return u32(pc + imm)
+        raise UnsupportedInstruction(f"unsupported U-type instruction: {opcode}")
 
     @staticmethod
     def _check_register(index: int) -> None:

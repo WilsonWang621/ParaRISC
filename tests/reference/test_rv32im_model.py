@@ -2,10 +2,14 @@ import pytest
 
 from src.pararisc.isa.encoding import (
     FUNCT7_BASE,
+    FUNCT7_MULDIV,
+    OPCODE_AUIPC,
+    OPCODE_LUI,
     OPCODE_OP,
     OPCODE_OP_IMM,
     encode_i_type,
     encode_r_type,
+    encode_u_type,
 )
 from src.pararisc.reference.rv32im_model import (
     IllegalInstruction,
@@ -90,6 +94,106 @@ def test_op_imm_shift_operations():
     assert model.read_reg(4) == 0xC0000000
 
 
+def test_r_type_add_sub_and_wraparound():
+    model = RV32IMModel()
+    model.write_reg(1, 0xFFFFFFFF)
+    model.write_reg(2, 2)
+    program = [
+        encode_r_type(OPCODE_OP, 3, 0b000, 1, 2, FUNCT7_BASE),
+        encode_r_type(OPCODE_OP, 4, 0b000, 2, 1, 0b0100000),
+    ]
+    model.load_program(0, program)
+
+    model.run(2)
+
+    assert model.read_reg(3) == 1
+    assert model.read_reg(4) == 3
+
+
+def test_r_type_signed_and_unsigned_comparisons():
+    model = RV32IMModel()
+    model.write_reg(1, 0xFFFFFFFF)
+    model.write_reg(2, 1)
+    program = [
+        encode_r_type(OPCODE_OP, 3, 0b010, 1, 2, FUNCT7_BASE),
+        encode_r_type(OPCODE_OP, 4, 0b011, 1, 2, FUNCT7_BASE),
+    ]
+    model.load_program(0, program)
+
+    model.run(2)
+
+    assert model.read_reg(3) == 1
+    assert model.read_reg(4) == 0
+
+
+def test_r_type_logic_operations():
+    model = RV32IMModel()
+    model.write_reg(1, 0xF0F00000)
+    model.write_reg(2, 0x0FF00FF0)
+    program = [
+        encode_r_type(OPCODE_OP, 3, 0b100, 1, 2, FUNCT7_BASE),
+        encode_r_type(OPCODE_OP, 4, 0b110, 1, 2, FUNCT7_BASE),
+        encode_r_type(OPCODE_OP, 5, 0b111, 1, 2, FUNCT7_BASE),
+    ]
+    model.load_program(0, program)
+
+    model.run(3)
+
+    assert model.read_reg(3) == 0xFF000FF0
+    assert model.read_reg(4) == 0xFFF00FF0
+    assert model.read_reg(5) == 0x00F00000
+
+
+def test_r_type_shift_operations_use_low_five_bits():
+    model = RV32IMModel()
+    model.write_reg(1, 0x80000000)
+    model.write_reg(2, 33)
+    program = [
+        encode_r_type(OPCODE_OP, 3, 0b001, 1, 2, FUNCT7_BASE),
+        encode_r_type(OPCODE_OP, 4, 0b101, 1, 2, FUNCT7_BASE),
+        encode_r_type(OPCODE_OP, 5, 0b101, 1, 2, 0b0100000),
+    ]
+    model.load_program(0, program)
+
+    model.run(3)
+
+    assert model.read_reg(3) == 0
+    assert model.read_reg(4) == 0x40000000
+    assert model.read_reg(5) == 0xC0000000
+
+
+def test_lui_writes_upper_immediate():
+    model = RV32IMModel()
+    model.load_program(0, [encode_u_type(OPCODE_LUI, 1, 0x12345000)])
+
+    trace = model.step()
+
+    assert model.read_reg(1) == 0x12345000
+    assert trace.rd == 1
+    assert trace.rd_value == 0x12345000
+
+
+def test_auipc_adds_immediate_to_current_pc():
+    model = RV32IMModel()
+    model.load_program(0x80000000, [encode_u_type(OPCODE_AUIPC, 1, 0x12345000)])
+
+    trace = model.step()
+
+    assert model.read_reg(1) == 0x92345000
+    assert trace.pc == 0x80000000
+    assert trace.rd_value == 0x92345000
+    assert trace.next_pc == 0x80000004
+
+
+def test_auipc_wraps_to_32_bits():
+    model = RV32IMModel()
+    model.load_program(0xFFFFF000, [encode_u_type(OPCODE_AUIPC, 1, 0x2000)])
+
+    model.step()
+
+    assert model.read_reg(1) == 0x1000
+
+
 def test_nop_keeps_x0_zero_and_advances_pc():
     model = RV32IMModel()
     model.write_reg(0, 123)
@@ -129,8 +233,8 @@ def test_illegal_instruction_raises():
 
 def test_supported_decode_but_unimplemented_execute_raises():
     model = RV32IMModel()
-    add = encode_r_type(OPCODE_OP, 1, 0b000, 2, 3, FUNCT7_BASE)
-    model.load_program(0, [add])
+    mul = encode_r_type(OPCODE_OP, 1, 0b000, 2, 3, FUNCT7_MULDIV)
+    model.load_program(0, [mul])
 
     with pytest.raises(UnsupportedInstruction):
         model.step()

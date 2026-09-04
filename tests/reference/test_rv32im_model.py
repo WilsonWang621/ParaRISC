@@ -536,6 +536,28 @@ def test_run_returns_ordered_traces():
     assert model.read_reg(2) == 3
 
 
+def test_handwritten_loop_sum_program_runs_to_completion():
+    model = RV32IMModel()
+    program = [
+        encode_i_type(OPCODE_OP_IMM, 1, 0b000, 0, 0),
+        encode_i_type(OPCODE_OP_IMM, 2, 0b000, 0, 1),
+        encode_i_type(OPCODE_OP_IMM, 3, 0b000, 0, 6),
+        encode_r_type(OPCODE_OP, 1, 0b000, 1, 2, FUNCT7_BASE),
+        encode_i_type(OPCODE_OP_IMM, 2, 0b000, 2, 1),
+        encode_b_type(OPCODE_BRANCH, 0b100, 2, 3, -8),
+    ]
+    model.load_program(0x80000000, program)
+
+    traces = model.run(18)
+
+    assert model.read_reg(1) == 15
+    assert model.read_reg(2) == 6
+    assert model.pc == 0x80000018
+    assert [trace.sequence for trace in traces] == list(range(18))
+    assert traces[-1].pc == 0x80000014
+    assert traces[-1].next_pc == 0x80000018
+
+
 def test_illegal_instruction_raises():
     model = RV32IMModel()
     model.load_program(0, [0x00000000])
